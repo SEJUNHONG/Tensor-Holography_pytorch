@@ -7,6 +7,7 @@ import torch.optim as optim
 import numpy as np
 import cv2
 import os, glob
+import time
 from PIL import Image
 import torchvision.transforms as transforms
 from models import TensorHoloModel
@@ -43,18 +44,19 @@ EVAL_RGB="C:/python/HOLOGRAM/data/eval/rgb.png"
 EVAL_DPT="C:/python/HOLOGRAM/data/eval/dpt.bmp"
 
 BATCH_SIZE=6
+EPOCH=1000
 
 TEST_CKPT_NAME='tensorholo.pt'
 
 def rgb_file_list(is_test):
     if is_test==True:
         typ='test'
-        num1=800
-        num2=1000
+        num1=3800
+        num2=4000
     else:
         typ='train'
         num1=0
-        num2=800
+        num2=3800
     rgb_list=list()
     for img_idx in range(num1, num2):
         rgb_path='./data/'+typ+'/rgb/'+str(img_idx)+'.png'
@@ -64,12 +66,12 @@ def rgb_file_list(is_test):
 def dpt_file_list(is_test):
     if is_test==True:
         typ='test'
-        num1=800
-        num2=1000
+        num1=3800
+        num2=4000
     else:
         typ='train'
         num1=0
-        num2=800
+        num2=3800
     dpt_list=list()
     for img_idx in range(num1, num2):
         dpt_path='./data/'+typ+'/dpt/'+str(img_idx)+'.bmp'
@@ -79,12 +81,12 @@ def dpt_file_list(is_test):
 def amp_file_list(is_test):
     if is_test==True:
         typ='test'
-        num1=800
-        num2=1000
+        num1=3800
+        num2=4000
     else:
         typ='train'
         num1=0
-        num2=800
+        num2=3800
     amp_list=list()
     for img_idx in range(num1, num2):
         amp_path='./data/'+typ+'/amp/Amp_'+str(img_idx)+'.bmp'
@@ -94,12 +96,12 @@ def amp_file_list(is_test):
 def phs_file_list(is_test):
     if is_test==True:
         typ='test'
-        num1=800
-        num2=1000
+        num1=3800
+        num2=4000
     else:
         typ='train'
         num1=0
-        num2=800
+        num2=3800
     phs_list=list()
     for img_idx in range(num1, num2):
         phs_path='./data/'+typ+'/phs/Phase_'+str(img_idx)+'.bmp'
@@ -219,9 +221,7 @@ print(std)
 '''
 def train(epoch):
     train_dataset=TensorHoloDataset(rgb_list=rgb_list, dpt_list=dpt_list, amp_list=amp_list, phs_list=phs_list, transform=transforms.Compose([transforms.ToTensor()]))
-    #train_dataset=TensorHoloDataset(rgb_list=rgb_list, dpt_list=dpt_list, amp_list=amp_list, phs_list=phs_list, transform=None)
     train_loader=torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
-
 
     print('\n[ Train Epoch: %d ]'%epoch)
     net.train()
@@ -237,11 +237,17 @@ def train(epoch):
         output_amp, output_phs=net(train_rgb, train_dpt)
         output_amp=output_amp[None, :, :, :]
         output_phs=output_phs[None, :, :, :]
+        #'''
         loss_amp=criterion(output_amp, train_amp)
         loss_phs=criterion(output_phs, train_phs)
-        #delta=torch.atan2(torch.sin(output_phs-train_phs), torch.cos(output_phs-train_phs))
-        #criterion1=output_amp-train_amp*torch.exp(1j*(delta-delta.conj()))
-        #criterion1=torch.linalg.norm(criterion1, ord=2, axis=1)
+        loss=loss_amp+loss_phs
+        #'''
+        '''
+        delta=torch.atan2(torch.sin(output_phs-train_phs), torch.cos(output_phs-train_phs))
+        criterion1=output_amp-train_amp*torch.exp(1j*(delta-delta.conj()))
+        criterion1=torch.linalg.norm(criterion1, ord=2, dim=1)
+        loss=torch.sqrt(torch.sum(criterion1**2))
+        '''
         '''
         WIDTH=192
         HEIGHT=192
@@ -264,8 +270,6 @@ def train(epoch):
         criterion2+=np.exp(BETA*(2*((far-near)/2)-(dt-Dt)))*(np.absolute(ASM(output_amp*np.exp(1j*output_phs), dt))-np.absolute(ASM(train_amp*np.exp(1j*train_phs), dt))+np.gradient(np.absolute(ASM(output_amp*np.exp(1j*output_phs) ,dt)))-np.gradient(np.absolute(ASM(train_amp*np.exp(1j*train_phs), dt))))
         criterion2=np.linalg.norm(criterion2, axis=1, ord=1)
         '''
-        loss=loss_amp+loss_phs
-        #loss=torch.sum(criterion1)
         loss.backward()
 
         optimizer.step()
@@ -275,46 +279,52 @@ def train(epoch):
             print('Current batch:', str(batch_idx))
             print('Current train loss:', loss.item())
     print('Total train loss:', train_loss/800) # 800 -> len(train data)
+    state={
+        "epoch": epoch+1,
+        "model_state_dict":net.state_dict(), 
+        "optimizer_state_dict": optimizer.state_dict(),
+        "global_step": global_step,
+    }
+    if not os.path.isdir('ckpt'):
+        os.mkdir('ckpt')
+    torch.save(state, './ckpt/'+filename)
+    print('Model Saved!')
 
 def test(epoch):
     rgb_list=rgb_file_list(is_test=True)
     dpt_list=dpt_file_list(is_test=True)
     amp_list=amp_file_list(is_test=True)
     phs_list=phs_file_list(is_test=True)
-    mean=(0.4,)
-    std=(0.2,)
+    
     test_dataset=TensorHoloDataset(rgb_list=rgb_list, dpt_list=dpt_list, amp_list=amp_list, phs_list=phs_list, transform=transforms.Compose([transforms.ToTensor()]))
-    #test_dataset=TensorHoloDataset(rgb_list=rgb_list, dpt_list=dpt_list, amp_list=amp_list, phs_list=phs_list, transform=None)
     test_loader=torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False)
-    '''
-    if os.path.isfile(CKPT_DIR+filename):
-        print("Loading Checkpoint")
-        checkpoint=torch.load(CKPT_DIR+filename)
-        net.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    '''
     print('\n[ Test Epoch: %d ]'%epoch)
+    time0=time.time()
     
     net.eval()
     test_loss=0
 
     for batch_idx, (test_rgb, test_dpt, test_amp, test_phs) in enumerate(test_loader):
-        test_rgb=test_rgb.to(device)
-        test_dpt=test_dpt.to(device)
-        test_amp=test_amp.to(device)
-        test_phs=test_phs.to(device)
+        
+        test_rgb=test_rgb.to(device).float()
+        test_dpt=test_dpt.to(device).float()
+        test_amp=test_amp.to(device).float()
+        test_phs=test_phs.to(device).float()
 
         output_amp, output_phs=net(test_rgb, test_dpt)
+        #'''
         loss_amp2=criterion(output_amp, test_amp)
         loss_phs2=criterion(output_phs, test_phs)
         loss2=loss_amp2+loss_phs2
-        #delta=torch.atan2(torch.sin(output_phs-test_phs), torch.cos(output_phs-test_phs))
-        #criterion1=output_amp-test_amp*torch.exp(1j*(delta-delta.conj()))
-        #criterion1=torch.linalg.norm(criterion1, ord=2, axis=1)
-        #loss=torch.sum(criterion1)
-        
-        #test_loss=loss.backward()
         test_loss+=loss2.item()
+        #'''
+        '''
+        delta=torch.atan2(torch.sin(output_phs-test_phs), torch.cos(output_phs-test_phs))
+        criterion1=output_amp-test_amp*torch.exp(1j*(delta-delta.conj()))
+        criterion1=torch.linalg.norm(criterion1, ord=2, dim=2)
+        loss=torch.sqrt(torch.sum(criterion1**2))
+        test_loss=loss.backward()
+        '''
         output_amp = output_amp.detach().cpu().numpy()
         output_phs = output_phs.detach().cpu().numpy()
 
@@ -325,14 +335,9 @@ def test(epoch):
 
         cv2.imwrite(os.path.join(RESULTS_DIR, 'amp_%d.bmp'%(800+batch_idx)), output_amp*255.0)
         cv2.imwrite(os.path.join(RESULTS_DIR, 'phs_%d.bmp'%(800+batch_idx)), output_phs*255.0)
+    dt=time.time()-time0
     print('Test Average Loss: ', test_loss) # 200 -> len(test data)
-    state={
-        'net':net.state_dict()
-    }
-    if not os.path.isdir('ckpt'):
-        os.mkdir('ckpt')
-    torch.save(state, './ckpt/'+filename)
-    print('Model Saved!')
+    print('iter time {:0.5f}'.format(dt))
 
     
 
@@ -347,8 +352,25 @@ def adjust_learning_rate(optimizer, epoch):
 
 if __name__=='__main__':
     
-    for epoch in range(0, 1000):
+    # load checkpoint
+    if os.path.isfile(CKPT_DIR + TEST_CKPT_NAME):
+        print("Loading Checkpoint")
+        checkpoint = torch.load(CKPT_DIR + TEST_CKPT_NAME)
+        net.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        start_epoch = checkpoint["epoch"]
+        global_step = checkpoint["global_step"]
+    else:
+        print("No checkpoint, start form the zero")
+        start_epoch = 0
+        global_step = 0
+
+    if start_epoch==EPOCH:
+        test(start_epoch)
+
+    for epoch in range(start_epoch, EPOCH):
         adjust_learning_rate(optimizer, epoch)
         train(epoch)
-        test(epoch)
+        if epoch%100==0:
+            test(epoch)
     
