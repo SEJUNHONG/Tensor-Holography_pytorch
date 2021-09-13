@@ -1,7 +1,6 @@
 from numpy.fft import fftshift
 from torchvision.transforms.transforms import Lambda
-from train_pytorch import BATCH_SIZE, HEIGHT, WIDTH
-import torch
+import torch, gc
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
@@ -13,6 +12,9 @@ import torchvision.transforms as transforms
 from models import TensorHoloModel
 import random
 import torch.backends.cudnn as cudnn
+
+gc.collect()
+torch.cuda.empty_cache()
 
 torch.manual_seed(0)
 torch.cuda.manual_seed(0)
@@ -31,11 +33,13 @@ TRAIN_RGB_DIR="C:/python/HOLOGRAM/data/train/rgb/*.png"
 TRAIN_DPT_DIR="C:/python/HOLOGRAM/data/train/depth2/*.bmp"
 TRAIN_AMP_DIR="C:/python/HOLOGRAM/data/train/amp/"+"*.bmp"
 TRAIN_PHS_DIR="C:/python/HOLOGRAM/data/train/phs/"+"*.bmp"
+TRAIN_LENGTH=3800
 
 TEST_RGB_DIR="C:/python/HOLOGRAM/data/test/rgb/*.png"
 TEST_DPT_DIR="C:/python/HOLOGRAM/data/test/depth2/*.bmp"
 TEST_AMP_DIR="C:/python/HOLOGRAM/data/test/amp/*.bmp"
 TEST_PHS_DIR="C:/python/HOLOGRAM/data/test/phs/*.bmp"
+TEST_LENGTH=200
 
 CKPT_DIR="C:/python/HOLOGRAM/ckpt/"
 RESULTS_DIR="C:/python/HOLOGRAM/results/"
@@ -43,20 +47,20 @@ RESULTS_DIR="C:/python/HOLOGRAM/results/"
 EVAL_RGB="C:/python/HOLOGRAM/data/eval/rgb.png"
 EVAL_DPT="C:/python/HOLOGRAM/data/eval/dpt.bmp"
 
-BATCH_SIZE=6
-EPOCH=1000
+BATCH_SIZE=2
+EPOCH=1001
 
 TEST_CKPT_NAME='tensorholo.pt'
 
 def rgb_file_list(is_test):
     if is_test==True:
         typ='test'
-        num1=3800
-        num2=4000
+        num1=TRAIN_LENGTH
+        num2=TRAIN_LENGTH+TEST_LENGTH
     else:
         typ='train'
         num1=0
-        num2=3800
+        num2=TRAIN_LENGTH
     rgb_list=list()
     for img_idx in range(num1, num2):
         rgb_path='./data/'+typ+'/rgb/'+str(img_idx)+'.png'
@@ -66,12 +70,12 @@ def rgb_file_list(is_test):
 def dpt_file_list(is_test):
     if is_test==True:
         typ='test'
-        num1=3800
-        num2=4000
+        num1=TRAIN_LENGTH
+        num2=TRAIN_LENGTH+TEST_LENGTH
     else:
         typ='train'
         num1=0
-        num2=3800
+        num2=TRAIN_LENGTH
     dpt_list=list()
     for img_idx in range(num1, num2):
         dpt_path='./data/'+typ+'/dpt/'+str(img_idx)+'.bmp'
@@ -81,12 +85,12 @@ def dpt_file_list(is_test):
 def amp_file_list(is_test):
     if is_test==True:
         typ='test'
-        num1=3800
-        num2=4000
+        num1=TRAIN_LENGTH
+        num2=TRAIN_LENGTH+TEST_LENGTH
     else:
         typ='train'
         num1=0
-        num2=3800
+        num2=TRAIN_LENGTH
     amp_list=list()
     for img_idx in range(num1, num2):
         amp_path='./data/'+typ+'/amp/Amp_'+str(img_idx)+'.bmp'
@@ -96,12 +100,12 @@ def amp_file_list(is_test):
 def phs_file_list(is_test):
     if is_test==True:
         typ='test'
-        num1=3800
-        num2=4000
+        num1=TRAIN_LENGTH
+        num2=TRAIN_LENGTH+TEST_LENGTH
     else:
         typ='train'
         num1=0
-        num2=3800
+        num2=TRAIN_LENGTH
     phs_list=list()
     for img_idx in range(num1, num2):
         phs_path='./data/'+typ+'/phs/Phase_'+str(img_idx)+'.bmp'
@@ -198,7 +202,7 @@ learning_rate=1e-4
 filename='tensorholo.pt'
 
 criterion = nn.MSELoss()
-optimizer=optim.Adam(net.parameters(), lr=learning_rate, betas=(0.9, 0.999))
+optimizer=optim.Adam(net.parameters(), lr=learning_rate, betas=(0.9, 0.999), eps=1e-08)
 
 rgb_list=rgb_file_list(is_test=False)
 dpt_list=dpt_file_list(is_test=False)
@@ -278,7 +282,7 @@ def train(epoch):
         if batch_idx %10==0:
             print('Current batch:', str(batch_idx))
             print('Current train loss:', loss.item())
-    print('Total train loss:', train_loss/800) # 800 -> len(train data)
+    print('Total train loss:', train_loss/TRAIN_LENGTH) # 800 -> len(train data)
     state={
         "epoch": epoch+1,
         "model_state_dict":net.state_dict(), 
@@ -333,20 +337,22 @@ def test(epoch):
         output_phs=np.transpose(output_phs[0,:,:,:], [1,2,0])
         output_phs=cv2.cvtColor(output_phs, cv2.COLOR_BGR2RGB)
 
-        cv2.imwrite(os.path.join(RESULTS_DIR, 'amp_%d.bmp'%(800+batch_idx)), output_amp*255.0)
-        cv2.imwrite(os.path.join(RESULTS_DIR, 'phs_%d.bmp'%(800+batch_idx)), output_phs*255.0)
+        cv2.imwrite(os.path.join(RESULTS_DIR, 'amp_%d.bmp'%(TRAIN_LENGTH+batch_idx)), output_amp*255.0)
+        cv2.imwrite(os.path.join(RESULTS_DIR, 'phs_%d.bmp'%(TRAIN_LENGTH+batch_idx)), output_phs*255.0)
     dt=time.time()-time0
-    print('Test Average Loss: ', test_loss) # 200 -> len(test data)
+    print('Test Average Loss: ', test_loss/TEST_LENGTH) # 200 -> len(test data)
     print('iter time {:0.5f}'.format(dt))
 
     
 
 def adjust_learning_rate(optimizer, epoch):
     lr = learning_rate
+    '''
     if epoch >= 100:
         lr /= 10
     if epoch >= 150:
         lr /= 10
+    '''
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
@@ -371,6 +377,6 @@ if __name__=='__main__':
     for epoch in range(start_epoch, EPOCH):
         adjust_learning_rate(optimizer, epoch)
         train(epoch)
-        if epoch%100==0:
+        if epoch%10==0:
             test(epoch)
     
